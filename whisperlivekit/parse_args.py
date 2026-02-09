@@ -196,6 +196,20 @@ def parse_args():
         default=False,
         help="If set, raw PCM (s16le) data is expected as input and FFmpeg will be bypassed. Frontend will use AudioWorklet instead of MediaRecorder."
     )
+    parser.add_argument(
+        "--tts",
+        action="store_true",
+        default=False,
+        help="Enable text-to-speech read-aloud feature.",
+    )
+    parser.add_argument(
+        "--tts-voice",
+        type=str,
+        default="es",
+        choices=["es", "en"],
+        dest="tts_voice",
+        help="TTS voice direction: 'es' = English text spoken in Spanish (Kokoro ONNX ef_dora), 'en' = Spanish text spoken in English (Soprano).",
+    )
     # SimulStreaming-specific arguments
     simulstreaming_group = parser.add_argument_group('SimulStreaming arguments (only used with --backend simulstreaming)')
 

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -42,8 +43,14 @@ async def get():
 async def handle_websocket_results(websocket, results_generator):
     """Consumes results from the audio processor and sends them via WebSocket."""
     try:
-        async for response in results_generator:
+        async for result in results_generator:
+            if isinstance(result, tuple):
+                response, tts_audio = result
+            else:
+                response, tts_audio = result, None
             await websocket.send_json(response.to_dict())
+            if tts_audio:
+                await websocket.send_json({"type": "tts_audio", "audio": tts_audio})
         # when the results_generator finishes it means all audio has been processed
         logger.info("Results generator finished. Sending 'ready_to_stop' to client.")
         await websocket.send_json({"type": "ready_to_stop"})
@@ -62,8 +69,17 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket connection opened.")
 
+    has_translation = bool(args.target_language)
+    has_tts = bool(args.tts) and transcription_engine is not None and transcription_engine.tts_engine is not None
+
     try:
-        await websocket.send_json({"type": "config", "useAudioWorklet": bool(args.pcm_input)})
+        await websocket.send_json({
+            "type": "config",
+            "useAudioWorklet": bool(args.pcm_input),
+            "hasTranslation": has_translation,
+            "hasTTS": has_tts,
+            "ttsVoice": args.tts_voice if has_tts else None,
+        })
     except Exception as e:
         logger.warning(f"Failed to send config to client: {e}")
             
@@ -72,8 +88,17 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            message = await websocket.receive_bytes()
-            await audio_processor.process_audio(message)
+            message = await websocket.receive()
+            if "bytes" in message and message["bytes"]:
+                await audio_processor.process_audio(message["bytes"])
+            elif "text" in message and message["text"]:
+                try:
+                    client_config = json.loads(message["text"])
+                    if client_config.get("type") == "client_config":
+                        audio_processor.apply_client_config(client_config)
+                        logger.info(f"Applied client config: {client_config}")
+                except json.JSONDecodeError:
+                    logger.warning("Received non-JSON text message from client.")
     except KeyError as e:
         if 'bytes' in str(e):
             logger.warning(f"Client has closed the connection.")

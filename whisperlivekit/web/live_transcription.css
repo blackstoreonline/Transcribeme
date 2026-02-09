@@ -628,3 +628,76 @@ label {
   font-weight: 800;
   color: var(--muted);
 }
+
+/* Mode toggle (Transcribe / Translate) */
+.mode-toggle {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--button-border);
+  background-color: var(--button-bg);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mode-toggle input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mode-toggle label {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.mode-toggle label:hover {
+  background-color: var(--chip-bg);
+}
+
+.mode-toggle input[type="radio"]:checked + label {
+  background-color: var(--chip-bg);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* TTS controls */
+.tts-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tts-btn {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--button-border);
+  border-radius: 50%;
+  background-color: var(--button-bg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 16px;
+  padding: 0;
+}
+
+.tts-btn:hover {
+  background-color: var(--chip-bg);
+}
+
+.tts-btn.active {
+  background-color: #d13d35;
+  border-color: #d13d35;
+}
+
+.tts-status {
+  font-size: 13px;
+  color: var(--muted);
+}

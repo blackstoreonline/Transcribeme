@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 import traceback
 from time import time
@@ -110,17 +111,28 @@ class AudioProcessor:
         self.transcription_queue: Optional[asyncio.Queue] = asyncio.Queue() if self.args.transcription else None
         self.diarization_queue: Optional[asyncio.Queue] = asyncio.Queue() if self.args.diarization else None
         self.translation_queue: Optional[asyncio.Queue] = asyncio.Queue() if self.args.target_language else None
+        self.tts_queue: asyncio.Queue = asyncio.Queue()
         self.pcm_buffer: bytearray = bytearray()
         self.total_pcm_samples: int = 0
         self.transcription_task: Optional[asyncio.Task] = None
         self.diarization_task: Optional[asyncio.Task] = None
         self.translation_task: Optional[asyncio.Task] = None
+        self.tts_task: Optional[asyncio.Task] = None
         self.watchdog_task: Optional[asyncio.Task] = None
         self.all_tasks_for_cleanup: List[asyncio.Task] = []
 
         self.transcription: Optional[Any] = None
         self.translation: Optional[Any] = None
         self.diarization: Optional[Any] = None
+        self.tts_engine: Optional[Any] = models.tts_engine
+
+        # Client-configurable mode: "transcribe" or "translate"
+        self.mode: str = "transcribe"
+        # Client-configurable TTS enabled state
+        self.tts_enabled: bool = bool(self.args.tts and self.tts_engine)
+        # Track last TTS text to avoid repeating
+        self._last_tts_text: str = ""
+        self._tts_audio_output: Optional[str] = None
 
         if self.args.transcription:
             self.transcription = online_factory(self.args, models.asr)
@@ -129,6 +141,15 @@ class AudioProcessor:
             self.diarization = online_diarization_factory(self.args, models.diarization_model)
         if models.translation_model:
             self.translation = online_translation_factory(self.args, models.translation_model)
+
+    def apply_client_config(self, config: dict) -> None:
+        """Apply client-sent configuration (mode, TTS preferences)."""
+        if "mode" in config:
+            self.mode = config["mode"]  # "transcribe" or "translate"
+            logger.info(f"Client set mode to: {self.mode}")
+        if "tts_enabled" in config:
+            self.tts_enabled = bool(config["tts_enabled"]) and self.tts_engine is not None
+            logger.info(f"Client set TTS enabled to: {self.tts_enabled}")
 
     async def _push_silence_event(self) -> None:
         if self.transcription_queue:
@@ -251,6 +272,8 @@ class AudioProcessor:
             await self.diarization_queue.put(SENTINEL)
         if self.translation:
             await self.translation_queue.put(SENTINEL)
+        if self.tts_engine:
+            await self.tts_queue.put(SENTINEL)
 
     async def transcription_processor(self) -> None:
         """Process audio chunks for transcription."""
@@ -396,6 +419,27 @@ class AudioProcessor:
                 logger.warning(f"Traceback: {traceback.format_exc()}")
         logger.info("Translation processor task finished.")
 
+    async def tts_processor(self) -> None:
+        """Process TTS requests and put audio results into the TTS queue."""
+        while True:
+            try:
+                item = await self.tts_queue.get()
+                self.tts_queue.task_done()
+                if item is SENTINEL:
+                    break
+                if not self.tts_enabled or not self.tts_engine:
+                    continue
+                text = item if isinstance(item, str) else ""
+                if not text.strip():
+                    continue
+                wav_bytes = await asyncio.to_thread(self.tts_engine.synthesize, text)
+                if wav_bytes:
+                    self._tts_audio_output = base64.b64encode(wav_bytes).decode("ascii")
+            except Exception as e:
+                logger.warning(f"Exception in tts_processor: {e}")
+                logger.warning(f"Traceback: {traceback.format_exc()}")
+        logger.info("TTS processor task finished.")
+
     async def results_formatter(self) -> AsyncGenerator[FrontData, None]:
         """Format processing results for output."""
         while True:
@@ -406,15 +450,21 @@ class AudioProcessor:
                     await asyncio.sleep(1)
                     continue
 
+                # Use translation only when mode is "translate"
+                show_translation = bool(self.translation) and self.mode == "translate"
+
                 self.tokens_alignment.update()
                 lines, buffer_diarization_text, buffer_translation_text = self.tokens_alignment.get_lines(
                     diarization=self.args.diarization,
-                    translation=bool(self.translation),
+                    translation=show_translation,
                     current_silence=self.current_silence
                 )
                 state = await self.get_current_state()
 
                 buffer_transcription_text = state.buffer_transcription.text if state.buffer_transcription else ''
+
+                if not show_translation:
+                    buffer_translation_text = ""
 
                 response_status = "active_transcription"
                 if not lines and not buffer_transcription_text and not buffer_diarization_text:
@@ -425,14 +475,35 @@ class AudioProcessor:
                     lines=lines,
                     buffer_transcription=buffer_transcription_text,
                     buffer_diarization=buffer_diarization_text,
-                    buffer_translation=buffer_translation_text,
+                    buffer_translation=buffer_translation_text if show_translation else "",
                     remaining_time_transcription=state.remaining_time_transcription,
                     remaining_time_diarization=state.remaining_time_diarization if self.args.diarization else 0
                 )
 
-                should_push = (response != self.last_response_content)
+                # Gather TTS audio if available
+                tts_audio = None
+                if self._tts_audio_output:
+                    tts_audio = self._tts_audio_output
+                    self._tts_audio_output = None
+
+                # Enqueue new text for TTS if enabled
+                if self.tts_enabled and self.tts_engine and lines:
+                    # Use translation text if in translate mode, otherwise transcription
+                    if show_translation:
+                        tts_text = " ".join(
+                            (l.translation or "") for l in lines if getattr(l, "translation", None)
+                        )
+                    else:
+                        tts_text = " ".join(
+                            (l.text or "") for l in lines if getattr(l, "text", None)
+                        )
+                    if tts_text and tts_text != self._last_tts_text:
+                        self._last_tts_text = tts_text
+                        await self.tts_queue.put(tts_text)
+
+                should_push = (response != self.last_response_content) or tts_audio
                 if should_push:
-                    yield response
+                    yield response, tts_audio
                     self.last_response_content = response
 
                 if self.is_stopping and self._processing_tasks_done():
@@ -479,6 +550,11 @@ class AudioProcessor:
             self.translation_task = asyncio.create_task(self.translation_processor())
             self.all_tasks_for_cleanup.append(self.translation_task)
             processing_tasks_for_watchdog.append(self.translation_task)
+
+        if self.tts_engine:
+            self.tts_task = asyncio.create_task(self.tts_processor())
+            self.all_tasks_for_cleanup.append(self.tts_task)
+            processing_tasks_for_watchdog.append(self.tts_task)
 
         # Monitor overall system health
         self.watchdog_task = asyncio.create_task(self.watchdog(processing_tasks_for_watchdog))
@@ -542,6 +618,7 @@ class AudioProcessor:
             self.transcription_task,
             self.diarization_task,
             self.translation_task,
+            self.tts_task,
             self.ffmpeg_reader_task,
         ]
         return all(task.done() for task in tasks_to_check if task)
@@ -561,6 +638,9 @@ class AudioProcessor:
 
             if self.transcription_queue:
                 await self.transcription_queue.put(SENTINEL)
+
+            if self.tts_engine:
+                await self.tts_queue.put(SENTINEL)
 
             if not self.is_pcm_input and self.ffmpeg_manager:
                 await self.ffmpeg_manager.stop()
