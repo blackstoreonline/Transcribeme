@@ -82,7 +82,11 @@ class SopranoTTS:
             raise
 
     def synthesize(self, text: str) -> Optional[bytes]:
-        """Synthesize text to English speech. Returns WAV bytes."""
+        """Synthesize text to English speech. Returns WAV bytes.
+
+        Note: trust_remote_code=True is required by this model's architecture.
+        Only use with models from trusted sources.
+        """
         if not self.model or not text.strip():
             return None
         try:

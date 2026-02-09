@@ -44,7 +44,10 @@ async def handle_websocket_results(websocket, results_generator):
     """Consumes results from the audio processor and sends them via WebSocket."""
     try:
         async for result in results_generator:
-            response, tts_audio = result
+            if isinstance(result, tuple):
+                response, tts_audio = result
+            else:
+                response, tts_audio = result, None
             await websocket.send_json(response.to_dict())
             if tts_audio:
                 await websocket.send_json({"type": "tts_audio", "audio": tts_audio})

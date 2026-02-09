@@ -127,7 +127,7 @@ class AudioProcessor:
         self.tts_engine: Optional[Any] = models.tts_engine
 
         # Client-configurable mode: "transcribe" or "translate"
-        self.mode: str = "translate" if self.args.target_language else "transcribe"
+        self.mode: str = "transcribe"
         # Client-configurable TTS enabled state
         self.tts_enabled: bool = bool(self.args.tts and self.tts_engine)
         # Track last TTS text to avoid repeating

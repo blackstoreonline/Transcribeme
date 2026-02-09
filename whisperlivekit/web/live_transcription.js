@@ -372,11 +372,7 @@ function sendClientConfig() {
 async function playTTSAudio(base64Audio) {
   try {
     const binaryStr = atob(base64Audio);
-    const len = binaryStr.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
+    const bytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
 
     if (!ttsPlaybackContext) {
       ttsPlaybackContext = new (window.AudioContext || window.webkitAudioContext)();
