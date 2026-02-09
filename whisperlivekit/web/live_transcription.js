@@ -32,6 +32,15 @@ const configReady = new Promise((r) => (configReadyResolve = r));
 let outputAudioContext = null;
 let audioSource = null;
 
+// Mode and TTS state
+let currentMode = "transcribe"; // "transcribe" or "translate"
+let ttsEnabled = false;
+let serverHasTranslation = false;
+let serverHasTTS = false;
+let ttsAudioQueue = [];
+let isTTSPlaying = false;
+let ttsPlaybackContext = null;
+
 waveCanvas.width = 60 * (window.devicePixelRatio || 1);
 waveCanvas.height = 30 * (window.devicePixelRatio || 1);
 waveCtx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
@@ -48,6 +57,11 @@ const microphoneSelect = document.getElementById("microphoneSelect");
 
 const settingsToggle = document.getElementById("settingsToggle");
 const settingsDiv = document.querySelector(".settings");
+const modeToggleContainer = document.getElementById("modeToggleContainer");
+const modeRadios = document.querySelectorAll('input[name="mode"]');
+const ttsToggleContainer = document.getElementById("ttsToggleContainer");
+const ttsToggleBtn = document.getElementById("ttsToggle");
+const ttsStatusSpan = document.getElementById("ttsStatus");
 
 // if (isExtension) {
 //   chrome.runtime.onInstalled.addListener((details) => {
@@ -266,10 +280,32 @@ function setupWebSocket() {
       const data = JSON.parse(event.data);
       if (data.type === "config") {
         serverUseAudioWorklet = !!data.useAudioWorklet;
+        serverHasTranslation = !!data.hasTranslation;
+        serverHasTTS = !!data.hasTTS;
+
+        // Show/hide mode toggle based on server capabilities
+        if (serverHasTranslation && modeToggleContainer) {
+          modeToggleContainer.style.display = "";
+        }
+        if (serverHasTTS && ttsToggleContainer) {
+          ttsToggleContainer.style.display = "";
+        }
+
         statusText.textContent = serverUseAudioWorklet
           ? "Connected. Using AudioWorklet (PCM)."
           : "Connected. Using MediaRecorder (WebM).";
+
+        // Send initial client config
+        sendClientConfig();
+
         if (configReadyResolve) configReadyResolve();
+        return;
+      }
+
+      if (data.type === "tts_audio") {
+        if (data.audio) {
+          playTTSAudio(data.audio);
+        }
         return;
       }
 
@@ -321,6 +357,39 @@ function setupWebSocket() {
       );
     };
   });
+}
+
+function sendClientConfig() {
+  if (websocket && websocket.readyState === WebSocket.OPEN) {
+    websocket.send(JSON.stringify({
+      type: "client_config",
+      mode: currentMode,
+      tts_enabled: ttsEnabled,
+    }));
+  }
+}
+
+async function playTTSAudio(base64Audio) {
+  try {
+    const binaryStr = atob(base64Audio);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+
+    if (!ttsPlaybackContext) {
+      ttsPlaybackContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    const audioBuffer = await ttsPlaybackContext.decodeAudioData(bytes.buffer);
+    const source = ttsPlaybackContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ttsPlaybackContext.destination);
+    source.start(0);
+  } catch (err) {
+    console.error("TTS audio playback error:", err);
+  }
 }
 
 function renderLinesWithBuffer(
@@ -784,6 +853,31 @@ settingsToggle.addEventListener("click", () => {
 settingsDiv.classList.toggle("visible");
 settingsToggle.classList.toggle("active");
 });
+
+// Mode toggle (Transcribe / Translate)
+if (modeRadios.length) {
+  modeRadios.forEach((r) => {
+    r.addEventListener("change", () => {
+      if (r.checked) {
+        currentMode = r.value;
+        sendClientConfig();
+      }
+    });
+  });
+}
+
+// TTS toggle
+if (ttsToggleBtn) {
+  ttsToggleBtn.addEventListener("click", () => {
+    ttsEnabled = !ttsEnabled;
+    ttsToggleBtn.classList.toggle("active", ttsEnabled);
+    ttsToggleBtn.querySelector(".tts-icon").textContent = ttsEnabled ? "🔊" : "🔇";
+    if (ttsStatusSpan) {
+      ttsStatusSpan.textContent = ttsEnabled ? "On" : "Off";
+    }
+    sendClientConfig();
+  });
+}
 
 if (isExtension) {
   async function checkAndRequestPermissions() {

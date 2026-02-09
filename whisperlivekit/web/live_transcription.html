@@ -42,6 +42,26 @@
                     </select>
                 </div>
 
+                <div class="field mode-toggle-container" id="modeToggleContainer" style="display:none;">
+                    <label>Mode</label>
+                    <div class="mode-toggle" role="radiogroup" aria-label="Mode selector">
+                        <input type="radio" id="mode-transcribe" name="mode" value="transcribe" checked />
+                        <label for="mode-transcribe">Transcribe</label>
+                        <input type="radio" id="mode-translate" name="mode" value="translate" />
+                        <label for="mode-translate">Translate</label>
+                    </div>
+                </div>
+
+                <div class="field tts-toggle-container" id="ttsToggleContainer" style="display:none;">
+                    <label>Read Aloud (TTS)</label>
+                    <div class="tts-controls">
+                        <button id="ttsToggle" class="tts-btn" title="Toggle text-to-speech">
+                            <span class="tts-icon">🔇</span>
+                        </button>
+                        <span id="ttsStatus" class="tts-status">Off</span>
+                    </div>
+                </div>
+
                 <div class="theme-selector-container">
                     <div class="segmented" role="radiogroup" aria-label="Theme selector">
                         <input type="radio" id="theme-system" name="theme" value="system" />

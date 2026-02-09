@@ -59,6 +59,8 @@ class TranscriptionEngine:
             "diarization_backend": "sortformer",
             "backend_policy": "simulstreaming",
             "backend": "auto",
+            "tts": False,
+            "tts_voice": "es",
         }
         global_params = update_with_kwargs(global_params, kwargs)
 
@@ -183,6 +185,16 @@ class TranscriptionEngine:
                 }
                 translation_params = update_with_kwargs(translation_params, kwargs)
                 self.translation_model = load_model([self.args.lan], **translation_params) #in the future we want to handle different languages for different speakers
+
+        self.tts_engine = None
+        if self.args.tts:
+            try:
+                from whisperlivekit.tts import TTSEngine
+                self.tts_engine = TTSEngine(tts_voice=self.args.tts_voice)
+                logger.info("TTS engine initialized with voice: %s", self.args.tts_voice)
+            except Exception as e:
+                logger.error("Failed to initialize TTS engine: %s", e)
+                self.tts_engine = None
 
 
 def online_factory(args, asr):
