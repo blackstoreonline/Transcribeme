@@ -148,7 +148,7 @@ def parse_args():
         type=str,
         default="auto",
         choices=["auto", "mlx-whisper", "faster-whisper", "whisper", "openai-api"],
-        help="Select the Whisper backend implementation (auto: prefer MLX on macOS, otherwise Faster-Whisper, else Whisper). Use 'openai-api' with --backend-policy localagreement to call OpenAI's API.",
+        help="Select the ASR backend implementation (auto: prefer MLX on macOS, otherwise Faster-Whisper, else Whisper).",
     )
     parser.add_argument(
         "--no-vac",
