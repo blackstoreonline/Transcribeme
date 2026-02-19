@@ -26,13 +26,6 @@ class ASRBase:
             self.original_language = lan
         self.model = self.load_model(model_size, cache_dir, model_dir)
 
-    def with_offset(self, offset: float) -> ASRToken:
-        # This method is kept for compatibility (typically you will use ASRToken.with_offset)
-        return ASRToken(self.start + offset, self.end + offset, self.text)
-
-    def __repr__(self):
-        return f"ASRToken(start={self.start:.2f}, end={self.end:.2f}, text={self.text!r})"
-
     def load_model(self, model_size, cache_dir, model_dir):
         raise NotImplementedError("must be implemented in the child class")
 
@@ -151,7 +144,7 @@ class FasterWhisperASR(ASRBase):
             if segment.no_speech_prob > 0.9:
                 continue
             for word in segment.words:
-                token = ASRToken(word.start, word.end, word.word)
+                token = ASRToken(word.start, word.end, word.word, probability=word.probability)
                 tokens.append(token)
         return tokens
 
@@ -187,22 +180,8 @@ class MLXWhisper(ASRBase):
         return transcribe
 
     def translate_model_name(self, model_name):
-        model_mapping = {
-            "tiny.en": "mlx-community/whisper-tiny.en-mlx",
-            "tiny": "mlx-community/whisper-tiny-mlx",
-            "base.en": "mlx-community/whisper-base.en-mlx",
-            "base": "mlx-community/whisper-base-mlx",
-            "small.en": "mlx-community/whisper-small.en-mlx",
-            "small": "mlx-community/whisper-small-mlx",
-            "medium.en": "mlx-community/whisper-medium.en-mlx",
-            "medium": "mlx-community/whisper-medium-mlx",
-            "large-v1": "mlx-community/whisper-large-v1-mlx",
-            "large-v2": "mlx-community/whisper-large-v2-mlx",
-            "large-v3": "mlx-community/whisper-large-v3-mlx",
-            "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
-            "large": "mlx-community/whisper-large-mlx",
-        }
-        mlx_model_path = model_mapping.get(model_name)
+        from whisperlivekit.model_mapping import MLX_MODEL_MAPPING
+        mlx_model_path = MLX_MODEL_MAPPING.get(model_name)
         if mlx_model_path:
             return mlx_model_path
         else:
@@ -227,7 +206,6 @@ class MLXWhisper(ASRBase):
             if segment.get("no_speech_prob", 0) > 0.9:
                 continue
             for word in segment.get("words", []):
-                probability=word["probability"]
                 token = ASRToken(word["start"], word["end"], word["word"])
                 tokens.append(token)
         return tokens
@@ -237,6 +215,7 @@ class MLXWhisper(ASRBase):
 
     def use_vad(self):
         self.transcribe_kargs["vad_filter"] = True
+
 
 class OpenaiApiASR(ASRBase):
     """Uses OpenAI's Whisper API for transcription."""
@@ -249,11 +228,13 @@ class OpenaiApiASR(ASRBase):
         self.load_model()
         self.use_vad_opt = False
         self.direct_english_translation = False
+        self.task = "transcribe"
 
     def load_model(self, *args, **kwargs):
         from openai import OpenAI
         self.client = OpenAI()
         self.transcribed_seconds = 0
+        self.transcribe_kargs = {}
 
     def ts_words(self, segments) -> List[ASRToken]:
         """
@@ -294,7 +275,8 @@ class OpenaiApiASR(ASRBase):
             params["language"] = self.original_language
         if prompt:
             params["prompt"] = prompt
-        proc = self.client.audio.translations if self.task == "translate" else self.client.audio.transcriptions
+        task = self.transcribe_kargs.get("task", self.task)
+        proc = self.client.audio.translations if task == "translate" else self.client.audio.transcriptions
         transcript = proc.create(**params)
         logger.debug(f"OpenAI API processed accumulated {self.transcribed_seconds} seconds")
         return transcript

@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 import threading
 import time
 from queue import Empty, SimpleQueue
@@ -14,13 +13,10 @@ from diart.sources import AudioSource, MicrophoneAudioSource
 from pyannote.core import Annotation
 from rx.core import Observer
 
+from whisperlivekit.diarization.utils import extract_number
 from whisperlivekit.timed_objects import SpeakerSegment
 
 logger = logging.getLogger(__name__)
-
-def extract_number(s: str) -> int:
-    m = re.search(r'\d+', s)
-    return int(m.group()) if m else None
 
 class DiarizationObserver(Observer):
     """Observer that logs all data emitted by the diarization pipeline and stores speaker segments."""
@@ -199,17 +195,14 @@ class DiartDiarization:
         self.inference.attach_observers(self.observer)
         asyncio.get_event_loop().run_in_executor(None, self.inference)
 
-    def insert_silence(self, silence_duration):
-        self.observer.global_time_offset += silence_duration
-
-    async def diarize(self, pcm_array: np.ndarray):
-        """
-        Process audio data for diarization.
-        Only used when working with WebSocketAudioSource.
-        """
+    def insert_audio_chunk(self, pcm_array: np.ndarray):
+        """Buffer audio for the next diarization step."""
         if self.custom_source:
-            self.custom_source.push_audio(pcm_array)            
-        # self.observer.clear_old_segments()        
+            self.custom_source.push_audio(pcm_array)
+
+    async def diarize(self):
+        """Return the current speaker segments from the diarization pipeline."""
+        return self.observer.get_segments()        
 
     def close(self):
         """Close the audio source."""
